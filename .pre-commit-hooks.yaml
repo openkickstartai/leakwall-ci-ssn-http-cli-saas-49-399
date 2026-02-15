@@ -1,0 +1,11 @@
+- id: leakwall
+  name: LeakWall - Sensitive Data Leak Scanner
+  description: >-
+    Scan staged files for credit cards, SSNs, API keys, JWTs, passwords,
+    private keys, connection strings, and other sensitive data before commit.
+  entry: leakwall scan
+  language: python
+  types: [text]
+  pass_filenames: true
+  stages: [pre-commit]
+  minimum_pre_commit_version: '2.9.0'

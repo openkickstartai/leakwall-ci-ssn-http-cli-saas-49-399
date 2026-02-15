@@ -1,0 +1,84 @@
+name: 'LeakWall Scan'
+description: >-
+  Intercept sensitive data leaks before production.
+  Scans for credit cards, SSNs, API keys, JWTs, passwords, private keys,
+  and connection strings in your codebase.
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  severity:
+    description: 'Minimum severity level to report (LOW, MEDIUM, HIGH, CRITICAL)'
+    required: false
+    default: 'HIGH'
+  format:
+    description: 'Output format: text, json, or sarif'
+    required: false
+    default: 'text'
+  config:
+    description: 'Path to a custom LeakWall configuration file'
+    required: false
+    default: ''
+  path:
+    description: 'File or directory path to scan'
+    required: false
+    default: '.'
+  fail-on-leak:
+    description: 'Set to false to report leaks without failing the workflow'
+    required: false
+    default: 'true'
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.11'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install LeakWall dependencies
+      shell: bash
+      run: |
+        pip install --quiet typer
+
+    - name: Run LeakWall scan
+      shell: bash
+      env:
+        LEAKWALL_MIN_SEVERITY: ${{ inputs.severity }}
+        LEAKWALL_CONFIG: ${{ inputs.config }}
+      run: |
+        set +e
+
+        SCAN_ARGS="${{ inputs.path }}"
+        SCAN_ARGS="$SCAN_ARGS --format ${{ inputs.format }}"
+
+        if [ "${{ inputs.fail-on-leak }}" = "false" ]; then
+          SCAN_ARGS="$SCAN_ARGS --no-fail"
+        fi
+
+        if [ "${{ inputs.format }}" = "sarif" ]; then
+          python "${{ github.action_path }}/leakwall.py" scan $SCAN_ARGS \
+            > "${{ github.workspace }}/leakwall-results.sarif"
+          SCAN_EXIT=$?
+          echo "--- LeakWall SARIF output written to leakwall-results.sarif ---"
+        else
+          python "${{ github.action_path }}/leakwall.py" scan $SCAN_ARGS
+          SCAN_EXIT=$?
+        fi
+
+        if [ $SCAN_EXIT -ne 0 ]; then
+          echo "::error::LeakWall detected sensitive data leaks in your code."
+        fi
+        exit $SCAN_EXIT
+
+    - name: Upload SARIF results to GitHub Security
+      if: always() && inputs.format == 'sarif'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: leakwall-results.sarif
+      continue-on-error: true
