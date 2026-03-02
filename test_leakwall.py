@@ -105,3 +105,69 @@ def test_masked_value_hides_secret():
     assert len(aws) == 1
     assert "AKIAIOSFODNN7EXAMPLE" not in aws[0]["masked_value"]
     assert "****" in aws[0]["masked_value"]
+
+
+def test_multiple_leaks_in_single_text():
+    """Multiple sensitive items in one text should all be detected."""
+    text = "Patient SSN: 123-45-6789 paid with card 4111111111111111"
+    findings = scan_text(text)
+    types = {f["type"] for f in findings}
+    assert "SSN" in types
+    assert "CREDIT_CARD" in types
+    assert len(findings) >= 2
+
+
+def test_multiline_scan_line_numbers():
+    """Line numbers must be accurate across multi-line input."""
+    text = "INFO ok\npassword=hunter2\nCard: 4111111111111111\nINFO done"
+    findings = scan_text(text)
+    pw = [f for f in findings if f["type"] == "PASSWORD_ASSIGN"]
+    cc = [f for f in findings if f["type"] == "CREDIT_CARD"]
+    assert len(pw) >= 1
+    assert len(cc) >= 1
+    assert pw[0]["line"] == 2
+    assert cc[0]["line"] == 3
+
+
+def test_connection_string_mysql():
+    """MySQL connection strings should be detected."""
+    findings = scan_text("DB_URL=mysql://root:s3cret@db.internal:3306/app")
+    cs = [f for f in findings if f["type"] == "CONN_STRING"]
+    assert len(cs) >= 1
+
+
+def test_connection_string_mongodb():
+    """MongoDB connection strings should be detected."""
+    findings = scan_text("MONGO_URI=mongodb://admin:pass@cluster0.abc.net:27017/prod")
+    cs = [f for f in findings if f["type"] == "CONN_STRING"]
+    assert len(cs) >= 1
+
+
+def test_private_key_ec():
+    """EC private keys should be detected alongside RSA."""
+    findings = scan_text("-----BEGIN EC PRIVATE KEY-----")
+    pk = [f for f in findings if f["type"] == "PRIVATE_KEY"]
+    assert len(pk) == 1
+
+
+def test_masked_value_never_exposes_full_secret():
+    """Masked output must never contain the original plaintext."""
+    findings = scan_text("Card: 4111111111111111")
+    cc = [f for f in findings if f["type"] == "CREDIT_CARD"]
+    assert len(cc) == 1
+    assert "4111111111111111" not in cc[0]["masked_value"]
+
+
+def test_empty_input_returns_no_findings():
+    """Empty string should produce zero findings."""
+    assert scan_text("") == []
+
+
+def test_finding_schema_contract():
+    """Every finding must have type, line, severity, compliance, masked_value."""
+    findings = scan_text("SSN: 123-45-6789")
+    assert len(findings) >= 1
+    required_keys = {"type", "line", "severity", "compliance", "masked_value"}
+    for f in findings:
+        missing = required_keys - set(f.keys())
+        assert not missing, f"Finding missing keys: {missing}"
